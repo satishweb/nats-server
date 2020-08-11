@@ -835,9 +835,9 @@ func (s *Server) leafNodeConnected(sub *subscription, _ *client, subject, reply 
 // Common filter options for system requests STATSZ VARZ SUBSZ CONNZ ROUTEZ GATEWAYZ LEAFZ
 // These options are
 type EventFilterOptions struct {
-	Name    string `json:"name,omitempty"`    // filter by server name
-	Cluster string `json:"cluster,omitempty"` // filter by cluster name
-	Host    string `json:"host,omitempty"`    // filter by host name
+	Name    string `json:"server-name,omitempty"` // filter by server name
+	Cluster string `json:"cluster,omitempty"`     // filter by cluster name
+	Host    string `json:"host,omitempty"`        // filter by host name
 }
 
 // StatszEventOptions are options passed to Statsz

@@ -1564,8 +1564,8 @@ func TestServerEventsPingStatsZ(t *testing.T) {
 	strRequestTbl := []string{
 		`{"cluster":"TEST"}`,
 		`{"cluster":"CLUSTER"}`,
-		`{"name":"SRV"}`,
-		`{"name":"_"}`,
+		`{"server-name":"SRV"}`,
+		`{"server-name":"_"}`,
 		fmt.Sprintf(`{"host":"%s"}`, optsB.Host),
 		fmt.Sprintf(`{"host":"%s", "cluster":"CLUSTER", "name":"SRV"}`, optsB.Host),
 	}
@@ -1605,7 +1605,7 @@ func TestServerEventsPingStatsZFilter(t *testing.T) {
 	requestTbl := []string{
 		`{"cluster":"DOESNOTEXIST"}`,
 		`{"host":"DOESNOTEXIST"}`,
-		`{"name":"DOESNOTEXIST"}`,
+		`{"server-name":"DOESNOTEXIST"}`,
 	}
 	for i, msg := range requestTbl {
 		t.Run(fmt.Sprintf("%s-%d", t.Name(), i), func(t *testing.T) {
@@ -1617,8 +1617,8 @@ func TestServerEventsPingStatsZFilter(t *testing.T) {
 	}
 	requestObjTbl := []EventFilterOptions{
 		{Cluster: "DOESNOTEXIST"},
-		{Cluster: "DOESNOTEXIST"},
-		{Cluster: "DOESNOTEXIST"},
+		{Host: "DOESNOTEXIST"},
+		{Name: "DOESNOTEXIST"},
 	}
 	for i, opt := range requestObjTbl {
 		t.Run(fmt.Sprintf("%s-%d", t.Name(), i), func(t *testing.T) {
