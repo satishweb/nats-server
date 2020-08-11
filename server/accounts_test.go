@@ -17,6 +17,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -2341,4 +2342,64 @@ func BenchmarkNewRouteReply(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		g.newServiceReply(false)
 	}
+}
+
+func TestSamplingHeader(t *testing.T) {
+	lOff := &serviceLatency{0, "foo"}
+	lOn := &serviceLatency{100, "foo"}
+	test := func(l *serviceLatency, h http.Header) {
+		t.Helper()
+		b := strings.Builder{}
+		b.WriteString("\r\n")
+		h.Write(&b)
+		hdrString := b.String()
+		sample, hdr := shouldSample(l, []byte(hdrString))
+		if l == lOff {
+			if !sample {
+				t.Fatal("Expected to sample")
+			} else if hdr == nil {
+				t.Fatal("Expected a header")
+			}
+			for k, v := range h {
+				if hdr.Get(k) != v[0] {
+					t.Fatal("Expect header to match")
+				}
+			}
+		} else if l == lOn {
+			if sample {
+				t.Fatal("Expected not to sample")
+			} else if hdr != nil {
+				t.Fatal("Expected no header")
+			}
+		}
+	}
+
+	test(lOn, http.Header{"Uber-Trace-Id": []string{"0:0:0:0"}})
+	test(lOn, http.Header{"Uber-Trace-Id": []string{"0:0:0:00"}}) // one byte encoded as two hex digits
+	test(lOff, http.Header{"Uber-Trace-Id": []string{"0:0:0:1"}})
+	test(lOff, http.Header{"Uber-Trace-Id": []string{"0:0:0:01"}})
+	test(lOff, http.Header{"Uber-Trace-Id": []string{"0:0:0:5"}}) // debug and sample
+	test(lOff, http.Header{"Uber-Trace-Id": []string{"479fefe9525eddb:5adb976bfc1f95c1:479fefe9525eddb:1"}})
+	test(lOff, http.Header{"Uber-Trace-Id": []string{"479fefe9525eddb:479fefe9525eddb:0:1"}})
+	test(lOn, http.Header{"Uber-Trace-Id": []string{"479fefe9525eddb:5adb976bfc1f95c1:479fefe9525eddb:0"}})
+	test(lOn, http.Header{"Uber-Trace-Id": []string{"479fefe9525eddb:479fefe9525eddb:0:0"}})
+
+	test(lOff, http.Header{"X-B3-Sampled": []string{"1"}})
+	test(lOn, http.Header{"X-B3-Sampled": []string{"0"}})
+	test(lOff, http.Header{"X-B3-TraceId": []string{"80f198ee56343ba864fe8b2a57d3eff7"}}) // decision left to recipient
+	test(lOn, http.Header{"X-B3-TraceId": []string{"80f198ee56343ba864fe8b2a57d3eff7"}, "X-B3-Sampled": []string{"0"}})
+	test(lOff, http.Header{"X-B3-TraceId": []string{"80f198ee56343ba864fe8b2a57d3eff7"}, "X-B3-Sampled": []string{"1"}})
+
+	test(lOn, http.Header{"B3": []string{"0"}}) // deny only
+	test(lOn, http.Header{"B3": []string{"0-0-0-0"}})
+	test(lOn, http.Header{"B3": []string{"0-0-0"}})
+	test(lOff, http.Header{"B3": []string{"0-0-1-0"}})
+	test(lOff, http.Header{"B3": []string{"0-0-1"}})
+	test(lOff, http.Header{"B3": []string{"0-0-d"}}) // debug is not a deny
+	test(lOff, http.Header{"B3": []string{"80f198ee56343ba864fe8b2a57d3eff7-e457b5a2e4d86bd1-1"}})
+	test(lOff, http.Header{"B3": []string{"80f198ee56343ba864fe8b2a57d3eff7-e457b5a2e4d86bd1-1-05e3ac9a4f6e3b90"}})
+	test(lOn, http.Header{"B3": []string{"80f198ee56343ba864fe8b2a57d3eff7-e457b5a2e4d86bd1-0-05e3ac9a4f6e3b90"}})
+
+	test(lOff, http.Header{"traceparent": []string{"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}})
+	test(lOn, http.Header{"traceparent": []string{"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"}})
 }

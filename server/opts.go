@@ -2360,7 +2360,7 @@ func parseServiceLatency(root token, v interface{}) (l *serviceLatency, retErr e
 	// Read sampling value.
 	if v, ok := latency["sampling"]; ok {
 		tk, v := unwrapValue(v, &lt)
-
+		header := false
 		var sample int64
 		switch vv := v.(type) {
 		case int64:
@@ -2368,6 +2368,11 @@ func parseServiceLatency(root token, v interface{}) (l *serviceLatency, retErr e
 			sample = vv
 		case string:
 			// Sample is a string, like "50%".
+			if strings.ToLower(strings.TrimSpace(vv)) == "headers" {
+				header = true
+				sample = 0
+				break
+			}
 			s := strings.TrimSuffix(vv, "%")
 			n, err := strconv.Atoi(s)
 			if err != nil {
@@ -2379,9 +2384,11 @@ func parseServiceLatency(root token, v interface{}) (l *serviceLatency, retErr e
 			return nil, &configErr{token: tk,
 				reason: fmt.Sprintf("Expected latency sample to be a string or map/struct, got %T", v)}
 		}
-		if sample < 1 || sample > 100 {
-			return nil, &configErr{token: tk,
-				reason: ErrBadSampling.Error()}
+		if !header {
+			if sample < 1 || sample > 100 {
+				return nil, &configErr{token: tk,
+					reason: ErrBadSampling.Error()}
+			}
 		}
 
 		sl.sampling = int8(sample)

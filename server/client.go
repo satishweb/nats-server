@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/rand"
 	"net"
+	"net/http"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -3339,8 +3340,8 @@ func (c *client) handleGWReplyMap(msg []byte) bool {
 }
 
 // Used to setup the response map for a service import request that has a reply subject.
-func (c *client) setupResponseServiceImport(acc *Account, si *serviceImport) *serviceImport {
-	rsi := si.acc.addRespServiceImport(acc, string(c.pa.reply), si)
+func (c *client) setupResponseServiceImport(acc *Account, si *serviceImport, tracking bool, header *http.Header) *serviceImport {
+	rsi := si.acc.addRespServiceImport(acc, string(c.pa.reply), si, tracking, header)
 	if si.latency != nil {
 		if c.rtt == 0 {
 			// We have a service import that we are tracking but have not established RTT.
@@ -3355,13 +3356,14 @@ func (c *client) setupResponseServiceImport(acc *Account, si *serviceImport) *se
 
 // processServiceImport is an internal callback when a subscription matches an imported service
 // from another account. This includes response mappings as well.
-func (c *client) processServiceImport(si *serviceImport, acc *Account, msg []byte) {
+func (c *client) processServiceImport(si *serviceImport, acc *Account, msg []byte, hdr []byte) {
 	if c.kind == GATEWAY && !si.isRespServiceImport() {
 		return
 	}
 
 	acc.mu.RLock()
 	shouldReturn := si.invalid || acc.sl == nil
+	share := si.share
 	acc.mu.RUnlock()
 
 	if shouldReturn {
@@ -3373,22 +3375,20 @@ func (c *client) processServiceImport(si *serviceImport, acc *Account, msg []byt
 
 	// Check if there is a reply present and set up a response.
 	// TODO(dlc) - restrict to configured service imports and not responses?
+	tracking, headers := shouldSample(si.latency, hdr)
+	if !share {
+		headers = nil
+	}
 	if len(c.pa.reply) > 0 {
-		rsi = c.setupResponseServiceImport(acc, si)
+		rsi = c.setupResponseServiceImport(acc, si, tracking, headers)
 		if rsi != nil {
 			nrr = []byte(rsi.from)
 		}
-	}
-
-	// Pick correct to subject. If we matched on a wildcard use the literal publish subject.
-	to := si.to
-	if si.hasWC {
-		to = string(c.pa.subject)
-	}
-
-	// Check to see if this was a bad request with no reply and we were supposed to be tracking.
-	if !si.response && si.latency != nil && len(c.pa.reply) == 0 && shouldSample(si.latency) {
-		si.acc.sendBadRequestTrackingLatency(si, c)
+	} else {
+		// Check to see if this was a bad request with no reply and we were supposed to be tracking.
+		if !si.response && si.latency != nil && tracking {
+			si.acc.sendBadRequestTrackingLatency(si, c, headers)
+		}
 	}
 
 	// Send tracking info here if we are tracking this response.
@@ -3396,6 +3396,12 @@ func (c *client) processServiceImport(si *serviceImport, acc *Account, msg []byt
 	var didSendTL bool
 	if si.tracking {
 		didSendTL = acc.sendTrackingLatency(si, c)
+	}
+
+	// Pick correct to subject. If we matched on a wildcard use the literal publish subject.
+	to := si.to
+	if si.hasWC {
+		to = string(c.pa.subject)
 	}
 
 	// FIXME(dlc) - Do L1 cache trick like normal client?
