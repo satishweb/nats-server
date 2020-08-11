@@ -1533,15 +1533,35 @@ func TestServerEventsPingStatsZ(t *testing.T) {
 	sa, _, sb, optsB, akp := runTrustedCluster(t)
 	defer sa.Shutdown()
 	defer sb.Shutdown()
-
 	url := fmt.Sprintf("nats://%s:%d", optsB.Host, optsB.Port)
 	nc, err := nats.Connect(url, createUserCreds(t, sb, akp))
 	if err != nil {
 		t.Fatalf("Error on connect: %v", err)
 	}
 	defer nc.Close()
-
-	requestTbl := []string{
+	test := func(req []byte) {
+		reply := nc.NewRespInbox()
+		sub, _ := nc.SubscribeSync(reply)
+		nc.PublishRequest(serverStatsPingReqSubj, reply, req)
+		// Make sure its a statsz
+		m := ServerStatsMsg{}
+		// Receive both manually.
+		msg, err := sub.NextMsg(time.Second)
+		if err != nil {
+			t.Fatalf("Error receiving msg: %v", err)
+		}
+		if err := json.Unmarshal(msg.Data, &m); err != nil {
+			t.Fatalf("Error unmarshalling the statz json: %v", err)
+		}
+		msg, err = sub.NextMsg(time.Second)
+		if err != nil {
+			t.Fatalf("Error receiving msg: %v", err)
+		}
+		if err := json.Unmarshal(msg.Data, &m); err != nil {
+			t.Fatalf("Error unmarshalling the statz json: %v", err)
+		}
+	}
+	strRequestTbl := []string{
 		`{"cluster":"TEST"}`,
 		`{"cluster":"CLUSTER"}`,
 		`{"name":"SRV"}`,
@@ -1549,32 +1569,23 @@ func TestServerEventsPingStatsZ(t *testing.T) {
 		fmt.Sprintf(`{"host":"%s"}`, optsB.Host),
 		fmt.Sprintf(`{"host":"%s", "cluster":"CLUSTER", "name":"SRV"}`, optsB.Host),
 	}
-
-	for _, msg := range requestTbl {
-		t.Run(msg, func(t *testing.T) {
-			reply := nc.NewRespInbox()
-			sub, _ := nc.SubscribeSync(reply)
-
-			nc.PublishRequest(serverStatsPingReqSubj, reply, []byte(msg))
-
-			// Make sure its a statsz
-			m := ServerStatsMsg{}
-
-			// Receive both manually.
-			msg, err := sub.NextMsg(time.Second)
-			if err != nil {
-				t.Fatalf("Error receiving msg: %v", err)
-			}
-			if err := json.Unmarshal(msg.Data, &m); err != nil {
-				t.Fatalf("Error unmarshalling the statz json: %v", err)
-			}
-			msg, err = sub.NextMsg(time.Second)
-			if err != nil {
-				t.Fatalf("Error receiving msg: %v", err)
-			}
-			if err := json.Unmarshal(msg.Data, &m); err != nil {
-				t.Fatalf("Error unmarshalling the statz json: %v", err)
-			}
+	for i, opt := range strRequestTbl {
+		t.Run(fmt.Sprintf("%s-%d", t.Name(), i), func(t *testing.T) {
+			test([]byte(opt))
+		})
+	}
+	requestTbl := []StatszEventOptions{
+		{EventFilterOptions: EventFilterOptions{Cluster: "TEST"}},
+		{EventFilterOptions: EventFilterOptions{Cluster: "CLUSTER"}},
+		{EventFilterOptions: EventFilterOptions{Name: "SRV"}},
+		{EventFilterOptions: EventFilterOptions{Name: "_"}},
+		{EventFilterOptions: EventFilterOptions{Host: optsB.Host}},
+		{EventFilterOptions: EventFilterOptions{Host: optsB.Host, Cluster: "CLUSTER", Name: "SRV"}},
+	}
+	for i, opt := range requestTbl {
+		t.Run(fmt.Sprintf("%s-%d", t.Name(), i), func(t *testing.T) {
+			msg, _ := json.MarshalIndent(&opt, "", "  ")
+			test(msg)
 		})
 	}
 }
@@ -1596,8 +1607,22 @@ func TestServerEventsPingStatsZFilter(t *testing.T) {
 		`{"host":"DOESNOTEXIST"}`,
 		`{"name":"DOESNOTEXIST"}`,
 	}
-	for _, msg := range requestTbl {
-		t.Run(msg, func(t *testing.T) {
+	for i, msg := range requestTbl {
+		t.Run(fmt.Sprintf("%s-%d", t.Name(), i), func(t *testing.T) {
+			// Receive both manually.
+			if _, err := nc.Request(serverStatsPingReqSubj, []byte(msg), time.Second/4); err != nats.ErrTimeout {
+				t.Fatalf("Error, expected timeout: %v", err)
+			}
+		})
+	}
+	requestObjTbl := []EventFilterOptions{
+		{Cluster: "DOESNOTEXIST"},
+		{Cluster: "DOESNOTEXIST"},
+		{Cluster: "DOESNOTEXIST"},
+	}
+	for i, opt := range requestObjTbl {
+		t.Run(fmt.Sprintf("%s-%d", t.Name(), i), func(t *testing.T) {
+			msg, _ := json.MarshalIndent(&opt, "", "  ")
 			// Receive both manually.
 			if _, err := nc.Request(serverStatsPingReqSubj, []byte(msg), time.Second/4); err != nats.ErrTimeout {
 				t.Fatalf("Error, expected timeout: %v", err)
